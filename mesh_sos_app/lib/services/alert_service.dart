@@ -1,39 +1,78 @@
 import 'dart:async';
 import 'package:flutter/foundation.dart';
+import 'package:flutter/services.dart';
+import 'package:audioplayers/audioplayers.dart';
 import '../models/sos_alert.dart';
+import 'notification_service.dart';
 
 class AlertService with ChangeNotifier {
   SosAlert? _activeEmergency;
   bool _isSirenMuted = false;
-  Timer? _vibrationLoopTimer;
+  Timer? _alertLoopTimer;
+  final AudioPlayer _audioPlayer = AudioPlayer();
 
   SosAlert? get activeEmergency => _activeEmergency;
   bool get hasActiveEmergency => _activeEmergency != null;
   bool get isSirenMuted => _isSirenMuted;
+
+  AlertService() {
+    _initAudio();
+  }
+
+  void _initAudio() {
+    _audioPlayer.setReleaseMode(ReleaseMode.stop);
+  }
 
   void triggerEmergencyAlert(SosAlert alert) {
     _activeEmergency = alert;
     _isSirenMuted = false;
     notifyListeners();
 
-    _startVibrationPulse();
+    // 1. Post Loud Mobile Notification
+    NotificationService().showSosNotification(
+      senderId: alert.senderId,
+      lat: alert.latitude,
+      lon: alert.longitude,
+      text: alert.message,
+    );
+
+    // 2. Start Repeating Siren & Heavy Vibration Loop
+    _startAlertLoop();
   }
 
-  void _startVibrationPulse() {
-    _vibrationLoopTimer?.cancel();
-    _vibrationLoopTimer = Timer.periodic(const Duration(seconds: 4), (timer) {
+  void _startAlertLoop() {
+    _alertLoopTimer?.cancel();
+    _playAlarmBeep();
+
+    _alertLoopTimer = Timer.periodic(const Duration(seconds: 3), (timer) {
       if (_activeEmergency == null || _isSirenMuted) {
         timer.cancel();
         return;
       }
-      // Haptic pulse simulation / trigger
-      debugPrint('🚨 [EMERGENCY HAPTIC & SIREN PULSE] Distress from Node ${_activeEmergency!.hexId}');
+      _playAlarmBeep();
     });
+  }
+
+  void _playAlarmBeep() async {
+    if (_isSirenMuted) return;
+
+    // Heavy system haptic feedback pattern
+    try {
+      HapticFeedback.heavyImpact();
+      Future.delayed(const Duration(milliseconds: 200), () => HapticFeedback.heavyImpact());
+      Future.delayed(const Duration(milliseconds: 400), () => HapticFeedback.heavyImpact());
+      Future.delayed(const Duration(milliseconds: 600), () => SystemSound.play(SystemSoundType.alert));
+    } catch (_) {}
+
+    debugPrint('🚨 [SIREN ALERT SOUND & VIBRATION ACTIVE] Node ${_activeEmergency?.hexId}');
   }
 
   void muteSiren() {
     _isSirenMuted = true;
-    _vibrationLoopTimer?.cancel();
+    _alertLoopTimer?.cancel();
+    try {
+      _audioPlayer.stop();
+    } catch (_) {}
     notifyListeners();
   }
 
@@ -50,13 +89,18 @@ class AlertService with ChangeNotifier {
 
   void dismissEmergency() {
     _activeEmergency = null;
-    _vibrationLoopTimer?.cancel();
+    _isSirenMuted = false;
+    _alertLoopTimer?.cancel();
+    try {
+      _audioPlayer.stop();
+    } catch (_) {}
     notifyListeners();
   }
 
   @override
   void dispose() {
-    _vibrationLoopTimer?.cancel();
+    _alertLoopTimer?.cancel();
+    _audioPlayer.dispose();
     super.dispose();
   }
 }

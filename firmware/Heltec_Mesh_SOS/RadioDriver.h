@@ -138,8 +138,8 @@ public:
         // 16. Set Sync Word (0x34)
         setSyncWord(LORA_SYNC_WORD);
 
-        // 17. Configure DIO IRQ Params (Route TxDone & RxDone to DIO1)
-        uint8_t irqParams[8] = {0x02, 0x03, 0x02, 0x03, 0x00, 0x00, 0x00, 0x00};
+        // 17. Configure DIO IRQ Params (Route TxDone, RxDone, HeaderErr, CrcErr, Timeout to DIO1)
+        uint8_t irqParams[8] = {0x02, 0x73, 0x02, 0x73, 0x00, 0x00, 0x00, 0x00};
         writeCommand(0x08, irqParams, 8);
 
         // 18. Clear IRQ status
@@ -198,7 +198,7 @@ public:
         uint8_t pktParams[6] = {0x00, LORA_PREAMBLE_LENGTH, 0x00, len, 0x01, 0x00};
         writeCommand(0x8C, pktParams, 6);
 
-        // Clear IRQ flags
+        // Clear IRQ flags before Tx
         uint8_t clearIrq[2] = {0xFF, 0xFF};
         writeCommand(0x02, clearIrq, 2);
 
@@ -219,7 +219,10 @@ public:
             delay(5);
         }
 
-        // Return back to continuous RX
+        // Always clear all IRQ flags post-TX
+        writeCommand(0x02, clearIrq, 2);
+
+        // Return back to continuous RX mode for incoming packets
         startRx();
         return txDone;
     }
@@ -236,8 +239,8 @@ public:
             uint8_t clearIrq[2] = {0xFF, 0xFF};
             writeCommand(0x02, clearIrq, 2);
 
-            // Check for CRC Error (bit 6)
-            if (irqStatus[1] & 0x40) {
+            // Check for CRC Error (bit 6) or Header Error (bit 5)
+            if (irqStatus[1] & 0x60) {
                 startRx();
                 return false;
             }
@@ -292,16 +295,24 @@ public:
             outPkt.snr = snr;
             outPkt.timestamp = millis();
 
+            // Re-arm continuous RX
             startRx();
             return true;
-        } else if (irqStatus[0] != 0 || (irqStatus[1] & 0xF8)) {
-            // Clear any error / timeout IRQ
+        } else if ((irqStatus[0] != 0) || (irqStatus[1] != 0)) {
+            // Any other IRQ (Timeout, CrcErr, HeaderErr, CadDone) -> clear and re-arm RX
             uint8_t clearIrq[2] = {0xFF, 0xFF};
             writeCommand(0x02, clearIrq, 2);
             startRx();
         }
 
         return false;
+    }
+
+    void setModulationProfile(uint8_t sf, uint8_t bw = 0x04, uint8_t cr = 0x03, uint8_t ldro = 0x00) {
+        // Opcode 0x8B: SetModulationParams (SF, BW, CR, LowDataRateOptimize)
+        uint8_t modParams[4] = {sf, bw, cr, ldro};
+        writeCommand(0x8B, modParams, 4);
+        startRx();
     }
 
     void setFrequency(float freqMHz) {

@@ -9,7 +9,8 @@ enum HapticPattern {
     HAPTIC_CONFIRM_SHORT,    // 1 short click (100ms) - Button feedback
     HAPTIC_SOS_TRIGGERED,     // 3 long pulses (500ms ON, 200ms OFF) - Emergency active
     HAPTIC_INCOMING_ALERT,   // 2 sharp double pulses - Message/Alert from team
-    HAPTIC_RESCUE_BEACON     // Repeating rhythmic pulse for search & rescue locating
+    HAPTIC_RESCUE_BEACON,    // Repeating rhythmic pulse for search & rescue locating
+    HAPTIC_RESCUE_HEARTBEAT  // Gentle rhythmic thump-thump (Help is on the way)
 };
 
 class HapticEngine {
@@ -26,11 +27,14 @@ public:
     HapticEngine(uint8_t pin) : _pin(pin) {}
 
     void begin() {
-        pinMode(_pin, OUTPUT);
-        digitalWrite(_pin, LOW);
+        if (_pin != 255 && _pin != 0) {
+            pinMode(_pin, OUTPUT);
+            digitalWrite(_pin, LOW);
+        }
     }
 
     void play(HapticPattern pattern) {
+        if (_pin == 255 || _pin == 0) return;
         _currentPattern = pattern;
         _patternStep = 0;
         _stepTimer = millis();
@@ -39,12 +43,13 @@ public:
 
     void setRescueBeacon(bool enabled) {
         _beaconActive = enabled;
-        if (!enabled) {
+        if (!enabled && _pin != 255 && _pin != 0) {
             digitalWrite(_pin, LOW);
         }
     }
 
     void update() {
+        if (_pin == 255 || _pin == 0) return;
         uint32_t now = millis();
 
         // Handle active pattern state machine
@@ -88,6 +93,29 @@ public:
                         if (now - _stepTimer >= 100) { _stepTimer = now; _patternStep++; digitalWrite(_pin, HIGH); }
                     } else if (_patternStep == 2) {
                         if (now - _stepTimer >= 150) {
+                            digitalWrite(_pin, LOW);
+                            _currentPattern = HAPTIC_NONE;
+                        }
+                    }
+                    break;
+
+                case HAPTIC_RESCUE_HEARTBEAT:
+                    // Thump-thump heartbeat sequence (120ms ON, 100ms OFF, 120ms ON, 600ms pause)
+                    if (_patternStep == 0) {
+                        digitalWrite(_pin, HIGH);
+                        if (now - _stepTimer >= 120) { _stepTimer = now; _patternStep++; digitalWrite(_pin, LOW); }
+                    } else if (_patternStep == 1) {
+                        if (now - _stepTimer >= 100) { _stepTimer = now; _patternStep++; digitalWrite(_pin, HIGH); }
+                    } else if (_patternStep == 2) {
+                        if (now - _stepTimer >= 120) { _stepTimer = now; _patternStep++; digitalWrite(_pin, LOW); }
+                    } else if (_patternStep == 3) {
+                        if (now - _stepTimer >= 500) { _stepTimer = now; _patternStep++; digitalWrite(_pin, HIGH); }
+                    } else if (_patternStep == 4) {
+                        if (now - _stepTimer >= 120) { _stepTimer = now; _patternStep++; digitalWrite(_pin, LOW); }
+                    } else if (_patternStep == 5) {
+                        if (now - _stepTimer >= 100) { _stepTimer = now; _patternStep++; digitalWrite(_pin, HIGH); }
+                    } else if (_patternStep == 6) {
+                        if (now - _stepTimer >= 120) {
                             digitalWrite(_pin, LOW);
                             _currentPattern = HAPTIC_NONE;
                         }

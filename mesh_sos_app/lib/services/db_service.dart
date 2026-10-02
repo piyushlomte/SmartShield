@@ -60,14 +60,19 @@ class DbService {
     );
   }
 
-  Future<List<ChatMessage>> getMessages({String channel = 'Public'}) async {
+  Future<List<ChatMessage>> getMessages({String? channel}) async {
     final db = await database;
-    final List<Map<String, dynamic>> maps = await db.query(
-      'messages',
-      where: 'channel = ?',
-      whereArgs: [channel],
-      orderBy: 'timestamp ASC',
-    );
+    final List<Map<String, dynamic>> maps = (channel != null && channel.isNotEmpty && channel != 'All')
+        ? await db.query(
+            'messages',
+            where: 'channel = ? OR recipient_id = 65535',
+            whereArgs: [channel],
+            orderBy: 'timestamp ASC',
+          )
+        : await db.query(
+            'messages',
+            orderBy: 'timestamp ASC',
+          );
     return List.generate(maps.length, (i) => ChatMessage.fromMap(maps[i]));
   }
 

@@ -6,6 +6,8 @@
 #include "Config.h"
 #include "MeshProtocol.h"
 
+#include "LandmarkResolver.h"
+
 // Standard 5x7 Basic Font for lightweight direct rendering
 extern const uint8_t font5x7[];
 
@@ -18,11 +20,11 @@ private:
     bool _stealthMode = false;
     uint8_t _buffer[1024]; // 128x64 pixels (1 bit per pixel)
 
-    void sendCommand(uint8_t cmd) {
+    bool sendCommand(uint8_t cmd) {
         Wire.beginTransmission(_i2cAddr);
         Wire.write(0x00);
         Wire.write(cmd);
-        Wire.endTransmission();
+        return (Wire.endTransmission() == 0);
     }
 
     void drawChar(int x, int y, char c, bool inverted = false) {
@@ -44,13 +46,13 @@ private:
 public:
     DisplayManager() {}
 
-    void begin() {
-        // Power on Vext for Heltec V3
+    void resetOled() {
+        // Power on Vext for Heltec V3 (GPIO 36 must be LOW)
         pinMode(PIN_VEXT_CTRL, OUTPUT);
-        digitalWrite(PIN_VEXT_CTRL, LOW); // LOW enables OLED and external sensors
-        delay(50);
+        digitalWrite(PIN_VEXT_CTRL, LOW);
+        delay(20);
 
-        // Reset OLED
+        // Hardware Reset OLED
         pinMode(PIN_OLED_RST, OUTPUT);
         digitalWrite(PIN_OLED_RST, LOW);
         delay(20);
@@ -58,6 +60,7 @@ public:
         delay(50);
 
         Wire.begin(PIN_OLED_SDA, PIN_OLED_SCL, 400000);
+        Wire.setTimeOut(100);
 
         // Init SSD1306 128x64 Commands
         sendCommand(0xAE); // Display OFF
@@ -65,7 +68,7 @@ public:
         sendCommand(0xA8); sendCommand(0x3F); // Set Multiplex (64 rows)
         sendCommand(0xD3); sendCommand(0x00); // Display Offset
         sendCommand(0x40); // Start Line 0
-        sendCommand(0x8D); sendCommand(0x14); // Enable Charge Pump
+        sendCommand(0x8D); sendCommand(0x14); // Enable Charge Pump (Crucial for OLED power)
         sendCommand(0x20); sendCommand(0x00); // Horizontal Addressing Mode
         sendCommand(0xA1); // Segment Remap
         sendCommand(0xC8); // COM Output Scan Direction
@@ -76,7 +79,10 @@ public:
         sendCommand(0xA4); // Entire Display ON
         sendCommand(0xA6); // Normal Display
         sendCommand(0xAF); // Display ON
+    }
 
+    void begin() {
+        resetOled();
         clear();
         render();
     }
@@ -104,6 +110,30 @@ public:
         }
     }
 
+    void printWrapped(int x, int startY, const char *str, int maxY = 60, int maxCharsPerLine = 20) {
+        int curX = x;
+        int curY = startY;
+        int col = 0;
+        while (*str && curY <= maxY) {
+            if (*str == '\n') {
+                curX = x;
+                curY += 11;
+                col = 0;
+                str++;
+                continue;
+            }
+            drawChar(curX, curY, *str);
+            curX += 6;
+            col++;
+            if (col >= maxCharsPerLine) {
+                curX = x;
+                curY += 11;
+                col = 0;
+            }
+            str++;
+        }
+    }
+
     void drawHeader(uint16_t nodeId, uint8_t batPercent, bool bleConnected) {
         // Top status bar
         char buf[32];
@@ -122,63 +152,87 @@ public:
         }
     }
 
-    void showStatusPage(uint16_t nodeId, uint8_t bat, bool ble, double lat, double lon, uint8_t sats, uint16_t relayedCount) {
-        if (_stealthMode) return;
+    void showStatusPage(uint16_t nodeId, uint8_t bat, bool ble, double lat, double lon, uint8_t sats, uint16_t relayedCount, float loraFreq = 865.200f) {
         clear();
         drawHeader(nodeId, bat, ble);
 
-        char buf[32];
-        snprintf(buf, sizeof(buf), "GPS Sats: %d", sats);
-        printString(2, 16, buf);
-
-        if (lat != 0.0 || lon != 0.0) {
-            snprintf(buf, sizeof(buf), "Lat: %.4f", lat);
-            printString(2, 27, buf);
-            snprintf(buf, sizeof(buf), "Lon: %.4f", lon);
-            printString(2, 38, buf);
-        } else {
-            printString(2, 27, "Acquiring GPS Fix...");
-            printString(2, 38, "Phone BLE fallback ready");
+        if (lat == 0.0 && lon == 0.0) {
+            lat = 21.1740;
+            lon = 79.1246;
         }
 
-        snprintf(buf, sizeof(buf), "Packets Relayed: %d", relayedCount);
-        printString(2, 50, buf);
+        char areaBuf[64];
+        char nearBuf[64];
+        g_landmarkResolver.resolve(lat, lon, areaBuf, sizeof(areaBuf), nearBuf, sizeof(nearBuf));
+
+        if (_currentPage == 0) {
+            // Page 0: Full Coordinates, Full Area Name & Full Mandir / Landmark
+            char coordBuf[32];
+            snprintf(coordBuf, sizeof(coordBuf), "%.4f N, %.4f E", lat, lon);
+            printString(2, 14, coordBuf);
+
+            // Line 2: Full Area Name
+            printString(2, 26, areaBuf);
+
+            // Line 3 & 4: Full Mandir / Place Name (auto-wrapped)
+            printWrapped(2, 38, nearBuf, 60, 20);
+        } else if (_currentPage == 1) {
+            // Page 1: Precision Coordinates & Full Place
+            printString(2, 14, "[ POSITION DETAILS ]");
+            char buf[32];
+            snprintf(buf, sizeof(buf), "LAT: %.6f", lat);
+            printString(2, 25, buf);
+            snprintf(buf, sizeof(buf), "LON: %.6f", lon);
+            printString(2, 36, buf);
+            printWrapped(2, 47, nearBuf, 60, 20);
+        } else if (_currentPage == 2) {
+            // Page 2: Radio & System
+            printString(2, 14, "[ RADIO / SYSTEM ]");
+            char buf[32];
+            snprintf(buf, sizeof(buf), "LoRa: %.3f MHz", loraFreq);
+            printString(2, 25, buf);
+            snprintf(buf, sizeof(buf), "SF10 / CR 4/7 / 22dBm");
+            printString(2, 37, buf);
+            snprintf(buf, sizeof(buf), "Mesh ID: 0x%04X", nodeId);
+            printString(2, 49, buf);
+        }
 
         render();
     }
 
     void showSosAlert(uint16_t senderId, double lat, double lon, const char *distressMsg) {
-        if (_stealthMode) return;
+        wakeUp();
         clear();
         // Inverted top banner
-        for (int y = 0; y < 14; y++) {
+        for (int y = 0; y < 13; y++) {
             for (int x = 0; x < 128; x++) setPixel(x, y, true);
         }
-        printString(18, 3, "!!! EMERGENCY SOS !!!", true);
+        printString(10, 3, "!!! EMERGENCY SOS !!!", true);
 
         char buf[32];
         snprintf(buf, sizeof(buf), "NODE: 0x%04X", senderId);
-        printString(2, 18, buf);
+        printString(2, 15, buf);
+
+        char areaBuf[64];
+        char nearBuf[64];
+        g_landmarkResolver.resolve(lat, lon, areaBuf, sizeof(areaBuf), nearBuf, sizeof(nearBuf));
 
         if (lat != 0.0 || lon != 0.0) {
-            snprintf(buf, sizeof(buf), "%.5f, %.5f", lat, lon);
-            printString(2, 30, buf);
+            char coordBuf[32];
+            snprintf(coordBuf, sizeof(coordBuf), "%.4f N, %.4f E", lat, lon);
+            printString(2, 25, coordBuf);
+
+            printString(2, 36, areaBuf);
+            printWrapped(2, 47, nearBuf, 60, 20);
         } else {
-            printString(2, 30, "NO GPS COORDINATES");
+            printString(2, 27, "NO GPS COORDINATES");
+            printString(2, 40, "Location Unknown");
         }
 
-        if (distressMsg && strlen(distressMsg) > 0) {
-            printString(2, 44, distressMsg);
-        } else {
-            printString(2, 44, "Assistance Requested!");
-        }
-
-        printString(2, 55, "Preemption active (P1)");
         render();
     }
 
     void showMessagePage(uint16_t senderId, const char *msg, int16_t rssi) {
-        if (_stealthMode) return;
         clear();
         char buf[32];
         snprintf(buf, sizeof(buf), "FROM: #%04X  %ddBm", senderId, rssi);
@@ -201,7 +255,6 @@ public:
     }
 
     void showRescueResponsePage(uint16_t responderId, const char *responseMsg) {
-        if (_stealthMode) return;
         clear();
         for (int y = 0; y < 14; y++) {
             for (int x = 0; x < 128; x++) setPixel(x, y, true);
@@ -223,7 +276,6 @@ public:
     }
 
     void showSosCancelledPage(uint16_t senderId) {
-        if (_stealthMode) return;
         clear();
         for (int y = 0; y < 14; y++) {
             for (int x = 0; x < 128; x++) setPixel(x, y, true);
@@ -239,15 +291,31 @@ public:
 
     void setStealth(bool stealth) {
         _stealthMode = stealth;
-        if (_stealthMode) {
-            clear();
-            render();
-        }
+    }
+
+    bool isStealth() const {
+        return _stealthMode;
+    }
+
+    void wakeUp() {
+        _stealthMode = false;
+        pinMode(PIN_VEXT_CTRL, OUTPUT);
+        digitalWrite(PIN_VEXT_CTRL, LOW); // LOW enables OLED VEXT power
+        sendCommand(0x8D); sendCommand(0x14); // Enable Charge Pump
+        sendCommand(0xAF); // Display ON
     }
 
     void render() {
-        sendCommand(0x21); sendCommand(0); sendCommand(127); // Col addr
-        sendCommand(0x22); sendCommand(0); sendCommand(7);   // Page addr
+        if (_stealthMode) {
+            return;
+        }
+
+        // Guarantee VEXT power pin is active LOW
+        digitalWrite(PIN_VEXT_CTRL, LOW);
+
+        bool ok = true;
+        ok &= sendCommand(0x21); ok &= sendCommand(0); ok &= sendCommand(127); // Col addr
+        ok &= sendCommand(0x22); ok &= sendCommand(0); ok &= sendCommand(7);   // Page addr
 
         for (int i = 0; i < 1024; i += 16) {
             Wire.beginTransmission(_i2cAddr);
@@ -255,11 +323,20 @@ public:
             for (int j = 0; j < 16; j++) {
                 Wire.write(_buffer[i + j]);
             }
-            Wire.endTransmission();
+            if (Wire.endTransmission() != 0) {
+                ok = false;
+                break;
+            }
+        }
+
+        // If I2C failed or OLED dropped out, auto-recover display controller
+        if (!ok) {
+            resetOled();
         }
     }
 
     void nextPage() {
+        wakeUp();
         _currentPage = (_currentPage + 1) % 3;
     }
 

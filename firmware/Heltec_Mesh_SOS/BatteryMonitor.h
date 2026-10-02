@@ -18,39 +18,46 @@ public:
     void begin() {
         pinMode(_ctrlPin, OUTPUT);
         digitalWrite(_ctrlPin, LOW); // LOW enables the divider on Heltec V3
-        analogReadResolution(12);    // 12-bit ADC (0-4095)
+        analogReadResolution(12);    // 12-bit ADC
         update();
     }
 
     void update() {
         uint32_t now = millis();
-        if (now - _lastSampleTime < 5000 && _lastSampleTime != 0) {
+        if (now - _lastSampleTime < 3000 && _lastSampleTime != 0) {
             return;
         }
         _lastSampleTime = now;
 
-        digitalWrite(_ctrlPin, LOW); // Enable measurement
-        delayMicroseconds(50);
+        digitalWrite(_ctrlPin, LOW); // Enable measurement divider
+        delayMicroseconds(100);
 
-        uint32_t raw = 0;
+        uint32_t rawSum = 0;
         for (int i = 0; i < 16; i++) {
-            raw += analogRead(_adcPin);
+            rawSum += analogReadMilliVolts(_adcPin);
         }
-        raw /= 16;
+        float pinVoltage = (rawSum / 16.0f) / 1000.0f; // In Volts (calibrated by ESP32-S3 eFuse)
 
-        // Heltec V3 voltage divider calibration factor:
-        // Divider ratio = (390k + 100k) / 100k = 4.9
-        // ADC reference is ~3.3V with 12-bit range (4095)
-        float pinVoltage = (raw / 4095.0f) * 3.3f;
-        _voltage = pinVoltage * 4.9f;
+        // Heltec V3 Hardware Divider: 390k + 100k -> Ratio = 4.90
+        _voltage = pinVoltage * 4.90f;
 
-        // LiPo curve approximation (3.20V to 4.20V)
-        if (_voltage >= 4.20f) {
+        // If running on USB cable without LiPo battery attached, pinVoltage is ~0V
+        if (_voltage < 2.50f) {
+            _percentage = 100; // USB / External 5V Powered
+        } else if (_voltage >= 4.20f) {
             _percentage = 100;
-        } else if (_voltage <= 3.30f) {
-            _percentage = 0;
+        } else if (_voltage >= 4.05f) {
+            _percentage = (uint8_t)(90 + ((_voltage - 4.05f) / 0.15f) * 10);
+        } else if (_voltage >= 3.85f) {
+            _percentage = (uint8_t)(60 + ((_voltage - 3.85f) / 0.20f) * 30);
+        } else if (_voltage >= 3.70f) {
+            _percentage = (uint8_t)(30 + ((_voltage - 3.70f) / 0.15f) * 30);
+        } else if (_voltage >= 3.50f) {
+            _percentage = (uint8_t)(10 + ((_voltage - 3.50f) / 0.20f) * 20);
+        } else if (_voltage > 3.20f) {
+            _percentage = (uint8_t)(((_voltage - 3.20f) / 0.30f) * 10);
         } else {
-            _percentage = (uint8_t)(((_voltage - 3.30f) / (4.20f - 3.30f)) * 100.0f);
+            _percentage = 5;
         }
     }
 

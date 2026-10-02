@@ -1,8 +1,11 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
 import '../providers/sos_provider.dart';
 import '../models/sos_alert.dart';
 import '../services/location_service.dart';
+import '../services/ai_safety_service.dart';
+import '../widgets/ai_emergency_assistant_card.dart';
 
 class SosScreen extends StatefulWidget {
   const SosScreen({super.key});
@@ -36,11 +39,25 @@ class _SosScreenState extends State<SosScreen> with SingleTickerProviderStateMix
   Widget build(BuildContext context) {
     final sosProvider = Provider.of<SosProvider>(context);
     final locationService = Provider.of<LocationService>(context);
+    final aiService = Provider.of<AiSafetyService>(context);
 
     return Scaffold(
       appBar: AppBar(
         title: const Text('Emergency Beacon', style: TextStyle(fontWeight: FontWeight.bold)),
         actions: [
+          IconButton(
+            icon: const Icon(Icons.flash_on, color: Colors.amberAccent),
+            tooltip: 'Visual SOS Strobe Beacon',
+            onPressed: () => _showStrobeDialog(context),
+          ),
+          IconButton(
+            icon: Icon(
+              Icons.av_timer,
+              color: aiService.isDeadManEnabled ? const Color(0xFF00E676) : Colors.white54,
+            ),
+            tooltip: '§10.3 Dead-Man\'s-Switch / Passive Check-In',
+            onPressed: () => _showDeadManDialog(context, aiService, sosProvider),
+          ),
           Row(
             children: [
               const Text('Silent Mode', style: TextStyle(fontSize: 12)),
@@ -58,6 +75,10 @@ class _SosScreenState extends State<SosScreen> with SingleTickerProviderStateMix
       body: ListView(
         padding: const EdgeInsets.all(16),
         children: [
+          // AI Emergency Engine & Explainable Risk Assistant
+          const AiEmergencyAssistantCard(),
+          const SizedBox(height: 12),
+
           // Emergency State Indicator / Active Broadcast Card
           if (sosProvider.isSelfSosActive)
             _buildActiveSosCard(context, sosProvider)
@@ -65,6 +86,58 @@ class _SosScreenState extends State<SosScreen> with SingleTickerProviderStateMix
             _buildTriggerSection(context, sosProvider, locationService),
 
           const SizedBox(height: 24),
+
+          // Quick Situational Triage Fast-Dispatch Templates
+          const Text(
+            'Quick Emergency Triage Templates',
+            style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16, color: Colors.white),
+          ),
+          const SizedBox(height: 8),
+          SingleChildScrollView(
+            scrollDirection: Axis.horizontal,
+            child: Row(
+              children: [
+                _buildTriageTemplateCard(
+                  context,
+                  sosProvider,
+                  icon: Icons.medical_services_outlined,
+                  color: const Color(0xFFFF5252),
+                  title: 'Medical Trauma',
+                  category: DistressCategory.medical,
+                  presetNote: 'Severe injury / trauma. Immediate first-aid requested!',
+                ),
+                _buildTriageTemplateCard(
+                  context,
+                  sosProvider,
+                  icon: Icons.terrain_outlined,
+                  color: const Color(0xFFFFB74D),
+                  title: 'Trapped / Rubble',
+                  category: DistressCategory.trapped,
+                  presetNote: 'Trapped under rubble / obstacle. Extraction needed!',
+                ),
+                _buildTriageTemplateCard(
+                  context,
+                  sosProvider,
+                  icon: Icons.local_fire_department_outlined,
+                  color: const Color(0xFFFF7043),
+                  title: 'Fire / Hazard',
+                  category: DistressCategory.fire,
+                  presetNote: 'Wildfire / toxic hazard condition. Evacuation required!',
+                ),
+                _buildTriageTemplateCard(
+                  context,
+                  sosProvider,
+                  icon: Icons.water_drop_outlined,
+                  color: const Color(0xFF42A5F5),
+                  title: 'Supplies / Water',
+                  category: DistressCategory.supplies,
+                  presetNote: 'Severe dehydration / critical supplies depleted!',
+                ),
+              ],
+            ),
+          ),
+
+          const SizedBox(height: 20),
 
           // Distress Category Selector
           const Text(
@@ -162,14 +235,52 @@ class _SosScreenState extends State<SosScreen> with SingleTickerProviderStateMix
     return Center(
       child: Column(
         children: [
-          const SizedBox(height: 10),
+          // Emergency Call Banner Graphic
+          Container(
+            height: 90,
+            margin: const EdgeInsets.only(bottom: 16),
+            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+            decoration: BoxDecoration(
+              color: const Color(0xFF161B22),
+              borderRadius: BorderRadius.circular(16),
+              border: Border.all(color: Colors.redAccent.withOpacity(0.3)),
+            ),
+            child: Row(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                Image.asset(
+                  'assets/images/emergency_banner.png',
+                  height: 70,
+                  fit: BoxFit.contain,
+                  errorBuilder: (_, __, ___) => const Icon(Icons.phone_in_talk, color: Colors.redAccent, size: 40),
+                ),
+                const SizedBox(width: 14),
+                const Column(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      'OFFLINE RESCUE BEACON',
+                      style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 13, letterSpacing: 0.5),
+                    ),
+                    SizedBox(height: 2),
+                    Text(
+                      'LoRa Mesh P2P Direct Dispatch',
+                      style: TextStyle(color: Color(0xFF00E676), fontSize: 11, fontWeight: FontWeight.w600),
+                    ),
+                  ],
+                ),
+              ],
+            ),
+          ),
+
           GestureDetector(
             onTap: () {
               sos.triggerSos(silent: _silentMode);
             },
             child: Container(
-              height: 180,
-              width: 180,
+              height: 170,
+              width: 170,
               decoration: BoxDecoration(
                 shape: BoxShape.circle,
                 gradient: const RadialGradient(
@@ -290,14 +401,29 @@ class _SosScreenState extends State<SosScreen> with SingleTickerProviderStateMix
                   style: TextStyle(color: Colors.white70, fontSize: 12),
                 ),
               const SizedBox(height: 16),
-              ElevatedButton.icon(
-                onPressed: () => sos.cancelSos(),
-                icon: const Icon(Icons.cancel, color: Colors.black),
-                label: const Text('CANCEL / RESOLVE SOS', style: TextStyle(fontWeight: FontWeight.bold, color: Colors.black)),
-                style: ElevatedButton.styleFrom(
-                  backgroundColor: Colors.white,
-                  padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
-                ),
+              Row(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  ElevatedButton.icon(
+                    onPressed: () => sos.cancelSos(isDuress: false),
+                    icon: const Icon(Icons.check_circle_outline, color: Colors.black),
+                    label: const Text('RESOLVE SOS', style: TextStyle(fontWeight: FontWeight.bold, color: Colors.black)),
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: Colors.white,
+                      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                    ),
+                  ),
+                  const SizedBox(width: 10),
+                  OutlinedButton.icon(
+                    onPressed: () => sos.cancelSos(isDuress: true),
+                    icon: const Icon(Icons.security, color: Colors.amber, size: 16),
+                    label: const Text('Duress Cancel', style: TextStyle(color: Colors.amber, fontSize: 11, fontWeight: FontWeight.bold)),
+                    style: OutlinedButton.styleFrom(
+                      side: const BorderSide(color: Colors.amber),
+                      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
+                    ),
+                  ),
+                ],
               ),
             ],
           ),
@@ -360,6 +486,55 @@ class _SosScreenState extends State<SosScreen> with SingleTickerProviderStateMix
             alert.message,
             style: TextStyle(color: Colors.white.withOpacity(0.9), fontSize: 13),
           ),
+
+          // Google Maps URL & Quick Navigation Bar
+          if (alert.hasValidLocation) ...[
+            const SizedBox(height: 10),
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+              decoration: BoxDecoration(
+                color: Colors.black38,
+                borderRadius: BorderRadius.circular(8),
+                border: Border.all(color: const Color(0xFF00E676).withOpacity(0.4)),
+              ),
+              child: Row(
+                children: [
+                  const Icon(Icons.map_outlined, color: Color(0xFF00E676), size: 18),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        const Text(
+                          'Google Maps Navigation URL:',
+                          style: TextStyle(fontSize: 10, color: Colors.white54, fontWeight: FontWeight.bold),
+                        ),
+                        Text(
+                          alert.googleMapsUrl,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: const TextStyle(fontSize: 11, color: Colors.cyanAccent, fontFamily: 'monospace'),
+                        ),
+                      ],
+                    ),
+                  ),
+                  IconButton(
+                    icon: const Icon(Icons.copy, color: Colors.white70, size: 16),
+                    tooltip: 'Copy Google Maps URL',
+                    onPressed: () {
+                      Clipboard.setData(ClipboardData(text: alert.googleMapsUrl));
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        SnackBar(
+                          content: Text('Copied: ${alert.googleMapsUrl}'),
+                          duration: const Duration(seconds: 2),
+                        ),
+                      );
+                    },
+                  ),
+                ],
+              ),
+            ),
+          ],
 
           // Responder status badge
           if (alert.responderName != null) ...[
@@ -426,6 +601,209 @@ class _SosScreenState extends State<SosScreen> with SingleTickerProviderStateMix
           ],
         ],
       ),
+    );
+  }
+
+  void _showDeadManDialog(BuildContext context, AiSafetyService ai, SosProvider sos) {
+    showDialog(
+      context: context,
+      builder: (ctx) => StatefulBuilder(
+        builder: (context, setModalState) => AlertDialog(
+          backgroundColor: const Color(0xFF161B22),
+          title: const Row(
+            children: [
+              Icon(Icons.av_timer, color: Color(0xFF58A6FF), size: 22),
+              SizedBox(width: 10),
+              Text('Dead-Man\'s Switch', style: TextStyle(color: Colors.white, fontSize: 16)),
+            ],
+          ),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              const Text(
+                '§10.3 Passive Check-In Mode: Automatically prompts you with haptic vibration at fixed intervals. If you do not tap "I am Safe" within 60s, emergency SOS is dispatched automatically.',
+                style: TextStyle(color: Colors.white70, fontSize: 12),
+              ),
+              const SizedBox(height: 16),
+              SwitchListTile(
+                contentPadding: EdgeInsets.zero,
+                title: const Text('Enable Passive Check-In', style: TextStyle(color: Colors.white, fontSize: 14)),
+                value: ai.isDeadManEnabled,
+                activeColor: const Color(0xFF00E676),
+                onChanged: (val) {
+                  setModalState(() => ai.setDeadManEnabled(val));
+                  sos.sendDeadManConfig(val, ai.deadManIntervalMins);
+                },
+              ),
+              if (ai.isDeadManEnabled) ...[
+                const SizedBox(height: 10),
+                const Text('Check-In Interval:', style: TextStyle(color: Colors.white54, fontSize: 12)),
+                const SizedBox(height: 8),
+                Wrap(
+                  spacing: 8,
+                  children: [15, 30, 60].map((mins) {
+                    final isSel = ai.deadManIntervalMins == mins;
+                    return ChoiceChip(
+                      label: Text('$mins min'),
+                      selected: isSel,
+                      selectedColor: const Color(0xFF00E676).withOpacity(0.3),
+                      labelStyle: TextStyle(
+                        color: isSel ? const Color(0xFF00E676) : Colors.white70,
+                        fontWeight: isSel ? FontWeight.bold : FontWeight.normal,
+                      ),
+                      onSelected: (sel) {
+                        if (sel) {
+                          setModalState(() => ai.setDeadManInterval(mins));
+                          sos.sendDeadManConfig(true, mins);
+                        }
+                      },
+                    );
+                  }).toList(),
+                ),
+              ],
+            ],
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(ctx),
+              child: const Text('Close'),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildTriageTemplateCard(
+    BuildContext context,
+    SosProvider sos, {
+    required IconData icon,
+    required Color color,
+    required String title,
+    required DistressCategory category,
+    required String presetNote,
+  }) {
+    final isSelected = sos.selectedCategory == category && sos.customDistressNote == presetNote;
+    return GestureDetector(
+      onTap: () {
+        sos.setCategory(category);
+        sos.setDistressNote(presetNote);
+        _noteController.text = presetNote;
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Selected template: $title'),
+            duration: const Duration(seconds: 1),
+          ),
+        );
+      },
+      child: Container(
+        margin: const EdgeInsets.only(right: 10),
+        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+        decoration: BoxDecoration(
+          color: isSelected ? color.withOpacity(0.25) : const Color(0xFF161B22),
+          borderRadius: BorderRadius.circular(12),
+          border: Border.all(
+            color: isSelected ? color : Colors.white12,
+            width: isSelected ? 2 : 1,
+          ),
+        ),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(icon, color: color, size: 20),
+            const SizedBox(width: 8),
+            Text(
+              title,
+              style: TextStyle(
+                color: isSelected ? color : Colors.white,
+                fontWeight: FontWeight.bold,
+                fontSize: 13,
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  void _showStrobeDialog(BuildContext context) {
+    showDialog(
+      context: context,
+      builder: (ctx) => const _EmergencyStrobeDialog(),
+    );
+  }
+}
+
+class _EmergencyStrobeDialog extends StatefulWidget {
+  const _EmergencyStrobeDialog();
+
+  @override
+  State<_EmergencyStrobeDialog> createState() => _EmergencyStrobeDialogState();
+}
+
+class _EmergencyStrobeDialogState extends State<_EmergencyStrobeDialog> with SingleTickerProviderStateMixin {
+  late AnimationController _strobeController;
+
+  @override
+  void initState() {
+    super.initState();
+    _strobeController = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 250),
+    )..repeat(reverse: true);
+  }
+
+  @override
+  void dispose() {
+    _strobeController.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return AnimatedBuilder(
+      animation: _strobeController,
+      builder: (context, child) {
+        final isWhite = _strobeController.value > 0.5;
+        return Scaffold(
+          backgroundColor: isWhite ? Colors.white : Colors.black,
+          body: InkWell(
+            onTap: () => Navigator.pop(context),
+            child: Center(
+              child: Column(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  Icon(
+                    Icons.flash_on,
+                    size: 80,
+                    color: isWhite ? Colors.black : Colors.redAccent,
+                  ),
+                  const SizedBox(height: 20),
+                  Text(
+                    'SOS VISUAL STROBE ACTIVE',
+                    textAlign: TextAlign.center,
+                    style: TextStyle(
+                      color: isWhite ? Colors.black : Colors.white,
+                      fontSize: 22,
+                      fontWeight: FontWeight.bold,
+                      letterSpacing: 2,
+                    ),
+                  ),
+                  const SizedBox(height: 10),
+                  Text(
+                    'Tap anywhere on screen to exit strobe',
+                    style: TextStyle(
+                      color: isWhite ? Colors.black54 : Colors.white54,
+                      fontSize: 14,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+        );
+      },
     );
   }
 }

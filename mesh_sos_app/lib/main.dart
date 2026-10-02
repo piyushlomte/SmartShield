@@ -7,6 +7,7 @@ import 'services/alert_service.dart';
 import 'providers/mesh_provider.dart';
 import 'providers/sos_provider.dart';
 import 'providers/theme_provider.dart';
+import 'providers/smartwatch_provider.dart';
 
 import 'screens/dashboard_screen.dart';
 import 'screens/chat_screen.dart';
@@ -15,11 +16,18 @@ import 'screens/map_radar_screen.dart';
 import 'screens/contacts_screen.dart';
 import 'screens/checklist_screen.dart';
 import 'widgets/emergency_banner.dart';
+import 'services/notification_service.dart';
 import 'package:permission_handler/permission_handler.dart';
+
+import 'services/ai_safety_service.dart';
+import 'widgets/ai_countdown_dialog.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
   
+  // Initialize Local Notifications
+  await NotificationService().init();
+
   // Request critical permissions on startup
   try {
     await [
@@ -27,7 +35,7 @@ void main() async {
       Permission.bluetoothConnect,
       Permission.bluetoothAdvertise,
       Permission.location,
-      Permission.bluetooth,
+      Permission.notification,
     ].request();
   } catch (e) {
     debugPrint('Initial permission request error: $e');
@@ -44,20 +52,39 @@ class MeshSosAppRoot extends StatelessWidget {
     return MultiProvider(
       providers: [
         ChangeNotifierProvider<ThemeProvider>(create: (_) => ThemeProvider()),
+        ChangeNotifierProvider<SmartwatchProvider>(create: (_) => SmartwatchProvider()),
         ChangeNotifierProvider<BleService>(create: (_) => BleService()),
         ChangeNotifierProvider<LocationService>(create: (_) => LocationService()..initLocation()),
         ChangeNotifierProvider<AlertService>(create: (_) => AlertService()),
-        ChangeNotifierProxyProvider<BleService, MeshProvider>(
-          create: (ctx) => MeshProvider(Provider.of<BleService>(ctx, listen: false)),
-          update: (ctx, ble, prev) => prev ?? MeshProvider(ble),
-        ),
-        ChangeNotifierProxyProvider3<BleService, LocationService, AlertService, SosProvider>(
-          create: (ctx) => SosProvider(
+        ChangeNotifierProvider<AiSafetyService>(create: (_) => AiSafetyService()),
+        ChangeNotifierProxyProvider2<BleService, LocationService, MeshProvider>(
+          create: (ctx) => MeshProvider(
             Provider.of<BleService>(ctx, listen: false),
             Provider.of<LocationService>(ctx, listen: false),
-            Provider.of<AlertService>(ctx, listen: false),
           ),
-          update: (ctx, ble, loc, alert, prev) => prev ?? SosProvider(ble, loc, alert),
+          update: (ctx, ble, loc, prev) => prev ?? MeshProvider(ble, loc),
+        ),
+        ChangeNotifierProxyProvider4<BleService, LocationService, AlertService, AiSafetyService, SosProvider>(
+          create: (ctx) {
+            final ble = Provider.of<BleService>(ctx, listen: false);
+            final loc = Provider.of<LocationService>(ctx, listen: false);
+            final alert = Provider.of<AlertService>(ctx, listen: false);
+            final ai = Provider.of<AiSafetyService>(ctx, listen: false);
+            final sos = SosProvider(ble, loc, alert);
+            ai.onAutoSosTriggered = (reason, riskScore) {
+              sos.setDistressNote(reason);
+              sos.triggerSos(silent: false);
+            };
+            return sos;
+          },
+          update: (ctx, ble, loc, alert, ai, prev) {
+            final sos = prev ?? SosProvider(ble, loc, alert);
+            ai.onAutoSosTriggered = (reason, riskScore) {
+              sos.setDistressNote(reason);
+              sos.triggerSos(silent: false);
+            };
+            return sos;
+          },
         ),
       ],
       child: Consumer<ThemeProvider>(
@@ -99,15 +126,20 @@ class _MainNavigationHolderState extends State<MainNavigationHolder> {
 
     return Scaffold(
       body: SafeArea(
-        child: Column(
+        child: Stack(
           children: [
-            const EmergencyBanner(),
-            Expanded(
-              child: IndexedStack(
-                index: _currentIndex,
-                children: _screens,
-              ),
+            Column(
+              children: [
+                const EmergencyBanner(),
+                Expanded(
+                  child: IndexedStack(
+                    index: _currentIndex,
+                    children: _screens,
+                  ),
+                ),
+              ],
             ),
+            const AiCountdownOverlay(),
           ],
         ),
       ),

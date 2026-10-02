@@ -22,7 +22,7 @@ private:
 public:
     DeduplicationTable() {
         for (int i = 0; i < DEDUPLICATION_CACHE_SIZE; i++) {
-            _history[i] = {0, 0, 0};
+            _history[i] = {0xFFFF, 0xFFFF, 0};
         }
     }
 

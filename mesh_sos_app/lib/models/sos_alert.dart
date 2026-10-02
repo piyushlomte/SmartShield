@@ -3,9 +3,11 @@ import 'mesh_packet.dart';
 enum DistressCategory {
   medical('Medical Emergency', '🚑'),
   injury('Trauma / Injury', '🩹'),
+  trapped('Trapped / Rubble', '🪨'),
   lost('Lost / Disoriented', '🧭'),
   fire('Fire / Hazard', '🔥'),
   attack('Wildlife / Threat', '⚠️'),
+  supplies('Supplies / Water', '💧'),
   general('General Assistance', '🆘');
 
   final String title;
@@ -53,6 +55,11 @@ class SosAlert {
   }) : timestamp = timestamp ?? DateTime.now();
 
   String get hexId => '0x${senderId.toRadixString(16).padLeft(4, '0').toUpperCase()}';
+  String get distressText => message;
+  String get googleMapsUrl => (latitude != 0.0 && longitude != 0.0)
+      ? 'https://maps.google.com/?q=$latitude,$longitude'
+      : '';
+  bool get hasValidLocation => latitude != 0.0 && longitude != 0.0;
 
   SosAlert copyWith({
     bool? isResolved,

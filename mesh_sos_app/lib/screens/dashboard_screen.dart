@@ -4,7 +4,15 @@ import '../providers/mesh_provider.dart';
 import '../providers/theme_provider.dart';
 import '../services/ble_service.dart';
 import '../services/location_service.dart';
+import '../services/ai_safety_service.dart';
 import '../widgets/signal_badge.dart';
+import '../widgets/ai_emergency_assistant_card.dart';
+import 'incident_journal_screen.dart';
+import 'ai_assistant_screen.dart';
+import 'mesh_topology_screen.dart';
+import 'rescue_beacon_screen.dart';
+import 'research_benchmark_screen.dart';
+import 'smartwatch_screen.dart';
 
 class DashboardScreen extends StatelessWidget {
   const DashboardScreen({super.key});
@@ -16,14 +24,42 @@ class DashboardScreen extends StatelessWidget {
     final bleService = Provider.of<BleService>(context);
     final locationService = Provider.of<LocationService>(context);
     final themeProvider = Provider.of<ThemeProvider>(context);
+    final aiService = Provider.of<AiSafetyService>(context);
 
     final onlineNodesCount = meshProvider.nodes.values.where((n) => n.isOnline).length;
+    final phonePos = locationService.currentPosition;
 
     return Scaffold(
       appBar: AppBar(
-        title: const Text('Offline Mesh SOS', style: TextStyle(fontWeight: FontWeight.bold)),
+        titleSpacing: 0,
+        leading: Padding(
+          padding: const EdgeInsets.all(8.0),
+          child: Image.asset(
+            'assets/images/app_logo.png',
+            fit: BoxFit.contain,
+            errorBuilder: (_, __, ___) => const Icon(Icons.shield, color: Colors.redAccent),
+          ),
+        ),
+        title: const Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text('SmartShield SOS', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 15)),
+            Text('Offline LoRa Mesh & GPS', style: TextStyle(fontSize: 10, color: Colors.white70)),
+          ],
+        ),
         actions: [
           IconButton(
+            visualDensity: VisualDensity.compact,
+            icon: const Icon(Icons.watch_outlined, color: Color(0xFF00E5FF)),
+            tooltip: 'Smartwatch Companion HUD',
+            onPressed: () {
+              Navigator.of(context).push(
+                MaterialPageRoute(builder: (_) => const SmartwatchScreen()),
+              );
+            },
+          ),
+          IconButton(
+            visualDensity: VisualDensity.compact,
             icon: Icon(
               themeProvider.isTrailMode ? Icons.wb_sunny_outlined : Icons.dark_mode_outlined,
               color: themeProvider.isTrailMode ? Colors.amber : null,
@@ -32,10 +68,12 @@ class DashboardScreen extends StatelessWidget {
             onPressed: () => themeProvider.toggleTrailMode(),
           ),
           IconButton(
+            visualDensity: VisualDensity.compact,
             icon: Icon(
               bleService.isConnected ? Icons.bluetooth_connected : Icons.bluetooth_disabled,
               color: bleService.isConnected ? const Color(0xFF00E676) : Colors.grey,
             ),
+            tooltip: bleService.isConnected ? 'Connected to Heltec' : 'Scan & Auto Connect',
             onPressed: () => _showBleDialog(context, bleService),
           ),
         ],
@@ -43,8 +81,58 @@ class DashboardScreen extends StatelessWidget {
       body: ListView(
         padding: const EdgeInsets.all(16),
         children: [
+          // Auto BLE Connect Status Banner
+          if (!bleService.isConnected)
+            Container(
+              margin: const EdgeInsets.only(bottom: 14),
+              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+              decoration: BoxDecoration(
+                color: const Color(0xFF161B22),
+                borderRadius: BorderRadius.circular(12),
+                border: Border.all(color: const Color(0xFF2F81F7).withOpacity(0.5)),
+              ),
+              child: Row(
+                children: [
+                  const SizedBox(
+                    width: 16,
+                    height: 16,
+                    child: CircularProgressIndicator(strokeWidth: 2, color: Color(0xFF2F81F7)),
+                  ),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          bleService.statusMessage,
+                          style: const TextStyle(color: Colors.white, fontSize: 12, fontWeight: FontWeight.bold),
+                        ),
+                        const Text(
+                          'Auto-pairing with Heltec-Mesh-SOS in background...',
+                          style: TextStyle(color: Colors.white54, fontSize: 10),
+                        ),
+                      ],
+                    ),
+                  ),
+                  TextButton(
+                    onPressed: () => _showBleDialog(context, bleService),
+                    style: TextButton.styleFrom(padding: EdgeInsets.zero, minimumSize: Size.zero),
+                    child: const Text('Manage', style: TextStyle(color: Color(0xFF58A6FF), fontSize: 12)),
+                  ),
+                ],
+              ),
+            ),
+
+          // AI Emergency Engine & Explainable Risk Assistant
+          const AiEmergencyAssistantCard(),
+          const SizedBox(height: 12),
+
           // Node Hardware Status Card
           _buildNodeStatusCard(context, meshProvider, bleService, locationService),
+          const SizedBox(height: 14),
+
+          // AI Edge Safety & Anomaly Engine Card
+          _buildAiSafetyCard(context, aiService),
           const SizedBox(height: 16),
 
           // Quick Statistics Grid
@@ -64,7 +152,7 @@ class DashboardScreen extends StatelessWidget {
                 child: _buildMetricTile(
                   context,
                   'Radio Band',
-                  '433 / 868 MHz',
+                  '865.200 MHz (IN)',
                   Icons.radio,
                   const Color(0xFFFF9800),
                 ),
@@ -77,10 +165,12 @@ class DashboardScreen extends StatelessWidget {
               Expanded(
                 child: _buildMetricTile(
                   context,
-                  'GPS Fix',
-                  locationService.currentPosition != null ? 'Active Lock' : 'Searching...',
+                  'Offline GPS',
+                  phonePos != null
+                      ? '${phonePos.latitude.toStringAsFixed(4)}, ${phonePos.longitude.toStringAsFixed(4)}'
+                      : 'Searching...',
                   Icons.satellite_alt,
-                  locationService.currentPosition != null ? const Color(0xFF00E676) : Colors.orange,
+                  phonePos != null ? const Color(0xFF00E676) : Colors.orange,
                 ),
               ),
               const SizedBox(width: 12),
@@ -95,15 +185,21 @@ class DashboardScreen extends StatelessWidget {
               ),
             ],
           ),
-          const SizedBox(height: 20),
+          const SizedBox(height: 16),
 
-          // Nearby Active Mesh Nodes List
+          // Nearby Active Mesh Nodes List with Distance & Bearing
           Row(
             mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
-              Text(
-                'Nearby Mesh Members',
-                style: theme.textTheme.titleMedium?.copyWith(fontWeight: FontWeight.bold),
+              Row(
+                children: [
+                  const Icon(Icons.near_me, size: 18, color: Color(0xFF00E676)),
+                  const SizedBox(width: 6),
+                  Text(
+                    'Nearby Users & Nodes',
+                    style: theme.textTheme.titleMedium?.copyWith(fontWeight: FontWeight.bold),
+                  ),
+                ],
               ),
               Text(
                 '${meshProvider.nodes.length} Discovered',
@@ -119,17 +215,26 @@ class DashboardScreen extends StatelessWidget {
               decoration: BoxDecoration(
                 color: theme.cardColor,
                 borderRadius: BorderRadius.circular(12),
+                border: Border.all(color: Colors.white10),
               ),
               child: const Center(
-                child: Text(
-                  'Listening on LoRa frequency...\nNo remote nodes detected yet.',
-                  textAlign: TextAlign.center,
-                  style: TextStyle(color: Colors.white54, height: 1.4),
+                child: Column(
+                  children: [
+                    Icon(Icons.radar, size: 36, color: Colors.white30),
+                    SizedBox(height: 10),
+                    Text(
+                      'Listening on LoRa mesh frequency...\nNearby users will appear here with live distance.',
+                      textAlign: TextAlign.center,
+                      style: TextStyle(color: Colors.white54, height: 1.4, fontSize: 12),
+                    ),
+                  ],
                 ),
               ),
             )
           else
-            ...meshProvider.nodes.values.map((node) => _buildNodeListTile(context, node)),
+            ...meshProvider.nodes.values.map(
+              (node) => _buildNodeListTile(context, node, locationService),
+            ),
         ],
       ),
     );
@@ -175,11 +280,11 @@ class DashboardScreen extends StatelessWidget {
                       Text(
                         ble.isConnected
                             ? ble.connectedDevice?.platformName ?? 'Heltec Node'
-                            : 'Node Disconnected',
+                            : 'Heltec Mesh Node',
                         style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16, color: Colors.white),
                       ),
                       Text(
-                        'ID: 0x${mesh.localNodeId.toRadixString(16).toUpperCase()}',
+                        'ID: 0x${mesh.localNodeId.toRadixString(16).padLeft(4, '0').toUpperCase()}',
                         style: const TextStyle(fontSize: 12, color: Colors.white54),
                       ),
                     ],
@@ -193,9 +298,9 @@ class DashboardScreen extends StatelessWidget {
                   borderRadius: BorderRadius.circular(20),
                 ),
                 child: Text(
-                  ble.isConnected ? 'PAIRED' : 'OFFLINE',
+                  ble.isConnected ? 'PAIRED' : 'AUTO-SEARCH',
                   style: TextStyle(
-                    color: ble.isConnected ? const Color(0xFF00E676) : Colors.red,
+                    color: ble.isConnected ? const Color(0xFF00E676) : Colors.orange,
                     fontSize: 11,
                     fontWeight: FontWeight.bold,
                   ),
@@ -211,15 +316,39 @@ class DashboardScreen extends StatelessWidget {
             children: [
               _buildMiniInfo('Battery', '${mesh.localBattery}%', Icons.battery_charging_full),
               _buildMiniInfo(
-                'Phone GPS',
+                'Coordinates',
                 loc.currentPosition != null
-                    ? '${loc.currentPosition!.latitude.toStringAsFixed(3)}, ${loc.currentPosition!.longitude.toStringAsFixed(3)}'
+                    ? '${loc.currentPosition!.latitude.toStringAsFixed(4)}, ${loc.currentPosition!.longitude.toStringAsFixed(4)}'
                     : 'Searching',
                 Icons.my_location,
               ),
-              _buildMiniInfo('Mesh Protocol', 'AES / Priority', Icons.security),
+              _buildMiniInfo('Mesh Protocol', 'SX1262 LoRa', Icons.security),
             ],
           ),
+          if (loc.currentPosition != null) ...[
+            const SizedBox(height: 10),
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+              decoration: BoxDecoration(
+                color: const Color(0xFF238636).withOpacity(0.12),
+                borderRadius: BorderRadius.circular(8),
+                border: Border.all(color: const Color(0xFF238636).withOpacity(0.3)),
+              ),
+              child: Row(
+                children: [
+                  const Icon(Icons.temple_hindu_rounded, size: 16, color: Color(0xFF00E676)),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: Text(
+                      '${loc.currentNearPlace} • ${loc.currentAreaName}',
+                      style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: Color(0xFF00E676)),
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ],
           if (!ble.isConnected)
             Padding(
               padding: const EdgeInsets.only(top: 12),
@@ -227,7 +356,7 @@ class DashboardScreen extends StatelessWidget {
                 width: double.infinity,
                 child: ElevatedButton.icon(
                   icon: const Icon(Icons.bluetooth_searching, size: 18),
-                  label: const Text('Scan & Connect LoRa Node', style: TextStyle(fontWeight: FontWeight.bold)),
+                  label: const Text('Connect Device Manually', style: TextStyle(fontWeight: FontWeight.bold)),
                   style: ElevatedButton.styleFrom(
                     backgroundColor: const Color(0xFF2F81F7),
                     foregroundColor: Colors.white,
@@ -238,6 +367,108 @@ class DashboardScreen extends StatelessWidget {
                 ),
               ),
             ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildAiSafetyCard(BuildContext context, AiSafetyService ai) {
+    return Container(
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: const Color(0xFF161B22),
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(
+          color: ai.isEnabled ? const Color(0xFF00E676).withOpacity(0.4) : Colors.white10,
+        ),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              Row(
+                children: [
+                  Container(
+                    padding: const EdgeInsets.all(6),
+                    decoration: BoxDecoration(
+                      color: ai.isEnabled ? const Color(0xFF00E676).withOpacity(0.15) : Colors.white10,
+                      shape: BoxShape.circle,
+                    ),
+                    child: Icon(
+                      Icons.psychology,
+                      color: ai.isEnabled ? const Color(0xFF00E676) : Colors.grey,
+                      size: 20,
+                    ),
+                  ),
+                  const SizedBox(width: 8),
+                  const Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        'AI Edge Safety Engine',
+                        style: TextStyle(fontWeight: FontWeight.bold, fontSize: 14, color: Colors.white),
+                      ),
+                      Text(
+                        'Fall, Impact & Inactivity Guard',
+                        style: TextStyle(fontSize: 10, color: Colors.white54),
+                      ),
+                    ],
+                  ),
+                ],
+              ),
+              Switch(
+                value: ai.isEnabled,
+                activeColor: const Color(0xFF00E676),
+                onChanged: (val) => ai.setEnabled(val),
+              ),
+            ],
+          ),
+          const SizedBox(height: 12),
+          const Divider(color: Colors.white10, height: 1),
+          const SizedBox(height: 10),
+          Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              _buildMiniInfo(
+                'Live Motion G',
+                '${(ai.currentG / 9.8).toStringAsFixed(2)} G',
+                Icons.speed,
+              ),
+              _buildMiniInfo(
+                'Anomaly State',
+                ai.isCountdownActive
+                    ? '⚠️ COUNTDOWN'
+                    : (ai.isEnabled ? '🟢 Normal' : '⚪ Standby'),
+                Icons.health_and_safety,
+              ),
+              _buildMiniInfo(
+                'Auto-SOS Delay',
+                '10 Seconds',
+                Icons.timer_outlined,
+              ),
+            ],
+          ),
+          const SizedBox(height: 12),
+          SizedBox(
+            width: double.infinity,
+            child: OutlinedButton.icon(
+              icon: const Icon(Icons.science_outlined, size: 16, color: Colors.cyanAccent),
+              label: const Text(
+                '🧪 Test AI Fall & Impact Trigger',
+                style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: Colors.cyanAccent),
+              ),
+              style: OutlinedButton.styleFrom(
+                side: const BorderSide(color: Colors.cyanAccent, width: 1),
+                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                padding: const EdgeInsets.symmetric(vertical: 8),
+              ),
+              onPressed: () {
+                ai.simulateFallEvent();
+              },
+            ),
+          ),
         ],
       ),
     );
@@ -274,13 +505,82 @@ class DashboardScreen extends StatelessWidget {
           const SizedBox(height: 8),
           Text(title, style: const TextStyle(fontSize: 11, color: Colors.white54)),
           const SizedBox(height: 2),
-          Text(val, style: const TextStyle(fontSize: 14, fontWeight: FontWeight.bold, color: Colors.white)),
+          Text(
+            val,
+            style: const TextStyle(fontSize: 13, fontWeight: FontWeight.bold, color: Colors.white),
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+          ),
         ],
       ),
     );
   }
 
-  Widget _buildNodeListTile(BuildContext context, dynamic node) {
+  Widget _buildActionCard(
+    BuildContext context, {
+    required String title,
+    required String subtitle,
+    required IconData icon,
+    required Color color,
+    required VoidCallback onTap,
+  }) {
+    return InkWell(
+      onTap: onTap,
+      borderRadius: BorderRadius.circular(12),
+      child: Container(
+        padding: const EdgeInsets.all(12),
+        decoration: BoxDecoration(
+          color: const Color(0xFF161B22),
+          borderRadius: BorderRadius.circular(12),
+          border: Border.all(color: color.withValues(alpha: 0.3)),
+        ),
+        child: Row(
+          children: [
+            Container(
+              padding: const EdgeInsets.all(8),
+              decoration: BoxDecoration(
+                color: color.withValues(alpha: 0.15),
+                shape: BoxShape.circle,
+              ),
+              child: Icon(icon, color: color, size: 18),
+            ),
+            const SizedBox(width: 10),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    title,
+                    style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 12),
+                  ),
+                  Text(
+                    subtitle,
+                    style: const TextStyle(color: Colors.white54, fontSize: 10),
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildNodeListTile(BuildContext context, dynamic node, LocationService loc) {
+    final pos = loc.currentPosition;
+    double dist = 0.0;
+    double bearing = 0.0;
+    bool hasGps = node.latitude != 0.0 && node.longitude != 0.0;
+
+    if (pos != null && hasGps) {
+      dist = LocationService.calculateDistance(pos.latitude, pos.longitude, node.latitude, node.longitude);
+      bearing = LocationService.calculateBearing(pos.latitude, pos.longitude, node.latitude, node.longitude);
+      if (bearing < 0) bearing += 360;
+    }
+
+    String distStr = dist > 1000 ? '${(dist / 1000).toStringAsFixed(1)} km away' : '${dist.toInt()} m away';
+    String dirStr = _getCardinalDirection(bearing);
+
     return Container(
       margin: const EdgeInsets.only(bottom: 8),
       padding: const EdgeInsets.all(12),
@@ -312,10 +612,23 @@ class DashboardScreen extends StatelessWidget {
                   node.name,
                   style: const TextStyle(fontWeight: FontWeight.bold, color: Colors.white),
                 ),
-                Text(
-                  'Hops: ${node.hopCount} | Bat: ${node.batteryPercent}% | GPS: ${node.gpsSource.label}',
-                  style: const TextStyle(fontSize: 11, color: Colors.white54),
-                ),
+                const SizedBox(height: 2),
+                if (hasGps && pos != null)
+                  Row(
+                    children: [
+                      const Icon(Icons.navigation, size: 12, color: Color(0xFF00E676)),
+                      const SizedBox(width: 4),
+                      Text(
+                        '$distStr • $dirStr (${bearing.toInt()}°)',
+                        style: const TextStyle(fontSize: 11, color: Color(0xFF00E676), fontWeight: FontWeight.bold),
+                      ),
+                    ],
+                  )
+                else
+                  Text(
+                    'Hops: ${node.hopCount} | Bat: ${node.batteryPercent}% | ${hasGps ? "GPS Fix" : "No GPS"}',
+                    style: const TextStyle(fontSize: 11, color: Colors.white54),
+                  ),
               ],
             ),
           ),
@@ -323,6 +636,17 @@ class DashboardScreen extends StatelessWidget {
         ],
       ),
     );
+  }
+
+  String _getCardinalDirection(double bearing) {
+    if (bearing >= 337.5 || bearing < 22.5) return 'N';
+    if (bearing >= 22.5 && bearing < 67.5) return 'NE';
+    if (bearing >= 67.5 && bearing < 112.5) return 'E';
+    if (bearing >= 112.5 && bearing < 157.5) return 'SE';
+    if (bearing >= 157.5 && bearing < 202.5) return 'S';
+    if (bearing >= 202.5 && bearing < 247.5) return 'SW';
+    if (bearing >= 247.5 && bearing < 292.5) return 'W';
+    return 'NW';
   }
 
   void _showBleDialog(BuildContext context, BleService ble) {
@@ -397,15 +721,22 @@ class DashboardScreen extends StatelessWidget {
                       separatorBuilder: (_, __) => const Divider(color: Colors.white10, height: 1),
                       itemBuilder: (context, i) {
                         final r = service.scanResults[i];
-                        final name = r.device.platformName.isEmpty ? 'Unknown BLE Device' : r.device.platformName;
-                        final isHeltec = name.toLowerCase().contains('heltec') || name.toLowerCase().contains('mesh') || name.toLowerCase().contains('sos');
+                        final advName = r.advertisementData.advName;
+                        final platName = r.device.platformName;
+                        final displayName = advName.isNotEmpty
+                            ? advName
+                            : (platName.isNotEmpty ? platName : 'Device (${r.device.remoteId.str})');
+                        final isHeltec = displayName.toLowerCase().contains('heltec') ||
+                            displayName.toLowerCase().contains('mesh') ||
+                            displayName.toLowerCase().contains('sos') ||
+                            r.advertisementData.serviceUuids.any((u) => u.toString().toUpperCase().contains('6E40'));
 
                         return ListTile(
                           contentPadding: const EdgeInsets.symmetric(horizontal: 4, vertical: 2),
                           leading: Container(
                             padding: const EdgeInsets.all(8),
                             decoration: BoxDecoration(
-                              color: isHeltec ? const Color(0xFF00E676).withOpacity(0.2) : Colors.white10,
+                              color: isHeltec ? const Color(0xFF00E676).withValues(alpha: 0.2) : Colors.white10,
                               shape: BoxShape.circle,
                             ),
                             child: Icon(
@@ -415,7 +746,7 @@ class DashboardScreen extends StatelessWidget {
                             ),
                           ),
                           title: Text(
-                            name,
+                            displayName,
                             style: TextStyle(
                               fontWeight: isHeltec ? FontWeight.bold : FontWeight.normal,
                               color: isHeltec ? const Color(0xFF00E676) : Colors.white,
@@ -423,7 +754,7 @@ class DashboardScreen extends StatelessWidget {
                             ),
                           ),
                           subtitle: Text(
-                            '${r.device.remoteId.str} | RSSI: ${r.rssi} dBm',
+                            '${r.device.remoteId.str} | RSSI: ${r.rssi} dBm${r.advertisementData.serviceUuids.isNotEmpty ? " • 6E40 Mesh" : ""}',
                             style: const TextStyle(fontSize: 11, color: Colors.white54),
                           ),
                           trailing: ElevatedButton(
@@ -462,4 +793,3 @@ class DashboardScreen extends StatelessWidget {
     );
   }
 }
-
